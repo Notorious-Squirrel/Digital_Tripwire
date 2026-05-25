@@ -22,11 +22,9 @@ Designed as a futuristic portable recon tool, TRIPWIRE scans for nearby BLE and 
 
 Inspired by:
 
-* 🎮 Watch Dogs
-* 👽 Alien Motion Tracker
-* 🌃 Cyberpunk 2077
-* 🛰 Military recon hardware
-* 📡 Wardriving platforms
+* piglet
+* halehound
+* digital tails
 
 ---
 
