@@ -36,6 +36,16 @@ struct DeviceInfo {
 };
 extern DeviceInfo devices[];
 
+enum AppState { APP_MENU, APP_BLE_SCAN, APP_WIFI_SCAN, APP_CONFIG, APP_ABOUT, APP_DEAUTH, APP_TRIPWIRE };
+extern AppState appState;
+
+extern int tripwireBaselineCount;
+extern int tripwireAlertCount;
+extern int tripwireStrongestRssi;
+extern char tripwireStrongestName[24];
+extern char tripwireLastNewMac[18];
+extern int tripwirePhase;
+
 // ======================================================
 // EMBEDDED HTML
 // ======================================================
@@ -151,6 +161,21 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
   </div>
 </div>
 
+<!-- ============ TRIPWIRE ============ -->
+<div class="card">
+  <h3>Tripwire Monitor</h3>
+  <div class="kv">
+    <div><span class="k">Phase</span><span class="v" id="vTwPhase">—</span></div>
+    <div><span class="k">Baseline</span><span class="v" id="vTwBaseline">—</span></div>
+    <div><span class="k">Alerts</span><span class="v" id="vTwAlerts">—</span></div>
+    <div><span class="k">Strongest</span><span class="v" id="vTwStrongest">—</span></div>
+    <div><span class="k">Last Alert</span><span class="v" id="vTwLastAlert">—</span></div>
+  </div>
+  <div class="row mt-md">
+    <button id="btnTripwire" onclick="enterTripwire()">&#x25b6; Start Tripwire</button>
+  </div>
+</div>
+
 <!-- ============ DEVICES ============ -->
 <div class="card">
   <h3>Detected Devices <span id="vDeviceCount" style="color:var(--accent)">0</span></h3>
@@ -198,7 +223,31 @@ async function loadStatus(){
     scanning=j.scanning;
     $('vDeviceCount').textContent=j.live||0;
     setText('vIp',j.ip||'—');
+    updateTripwire(j);
   }catch(e){console.error('status',e)}
+}
+
+function updateTripwire(j){
+  const tw=j.tripwire||{};
+  const phase=tw.phase||'Inactive';
+  setText('vTwPhase',tw.active?phase:phase);
+  setText('vTwBaseline',tw.baselineCount);
+  setText('vTwAlerts',tw.alertCount);
+  const s=tw.strongestRssi!==undefined?tw.strongestRssi+' dBm '+(tw.strongestName||''):'—';
+  setText('vTwStrongest',s);
+  setText('vTwLastAlert',tw.lastNewMac||'—');
+  const btn=$('btnTripwire');
+  if(tw.active){
+    btn.textContent='\u25a0 Running (hold display to stop)';
+    btn.disabled=true;
+  }else{
+    btn.textContent='\u25b6 Start Tripwire';
+    btn.disabled=false;
+  }
+}
+
+async function enterTripwire(){
+  try{await fetch('/api/tripwire/enter',{method:'POST'});await loadStatus();}catch(e){}
 }
 
 function setText(id,v){const e=$(id);if(e)e.textContent=(v===undefined||v===null)?'—':String(v)}
@@ -285,7 +334,7 @@ static void handleRoot() {
 }
 
 static void handleStatus() {
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(1536);
 
     doc["mode"] = (currentMode == BLE_MODE) ? "BLE" : "WiFi";
     doc["scanning"] = !scanningPaused;
@@ -304,6 +353,19 @@ static void handleStatus() {
         doc["targetMac"] = String(t.mac);
         doc["targetRssi"] = t.rssi;
     }
+
+    JsonObject tw = doc.createNestedObject("tripwire");
+    tw["active"] = (appState == APP_TRIPWIRE);
+    if (appState == APP_TRIPWIRE) {
+        tw["phase"] = tripwirePhase ? "ACTIVE" : "IDLE";
+    } else {
+        tw["phase"] = "Inactive";
+    }
+    tw["baselineCount"] = tripwireBaselineCount;
+    tw["alertCount"] = tripwireAlertCount;
+    tw["strongestRssi"] = tripwireStrongestRssi;
+    tw["strongestName"] = String(tripwireStrongestName);
+    tw["lastNewMac"] = String(tripwireLastNewMac);
 
     String out;
     serializeJson(doc, out);
@@ -346,6 +408,13 @@ static void handleScanPause() {
 
 static void handleScanResume() {
     scanningPaused = false;
+    server.send(200, "text/plain", "OK");
+}
+
+static void handleEnterTripwire() {
+    if (appState != APP_TRIPWIRE) {
+        appState = APP_TRIPWIRE;
+    }
     server.send(200, "text/plain", "OK");
 }
 
@@ -501,6 +570,7 @@ void startWebUI() {
     server.on("/api/mode", HTTP_POST, handleMode);
     server.on("/api/scan/pause", HTTP_POST, handleScanPause);
     server.on("/api/scan/resume", HTTP_POST, handleScanResume);
+    server.on("/api/tripwire/enter", HTTP_POST, handleEnterTripwire);
     server.on("/api/files", handleFiles);
     server.on("/api/download", handleDownload);
     server.on("/api/downloadAll", handleDownloadAll);

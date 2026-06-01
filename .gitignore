@@ -10,3 +10,13 @@ build/
 .preproc/
 _sketches_/
 __pycache__/
+.theia/
+
+# old copies / junk
+V1/
+V2/
+tripwire_x_piglet_edition/
+tripwire_x_round_display__1__copy_20260520153130/
+tripwire_x_round_display_full/
+xxx.txt.save
+sqllogo.png
