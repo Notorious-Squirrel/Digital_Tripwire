@@ -1,0 +1,12 @@
+*.o
+*.o.d
+*.elf
+*.bin
+*.hex
+*.map
+*.sdkconfig
+build/
+.cache/
+.preproc/
+_sketches_/
+__pycache__/
