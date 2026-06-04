@@ -1,11 +1,20 @@
+#include <TFT_eSPI.h>
 #include <SPI.h>
+#include <Wire.h>
+
+// #define DISABLE_BLE 1
+
+#ifndef DISABLE_BLE
 #include <NimBLEDevice.h>
+#endif
+
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_wifi_types.h>
 #include <SD.h>
 #include <FS.h>
 #include "boot.h"
+#include "types.h"
 #include "WebUI.h"
 #include "squirrel_egg.h"
 #include "oui.h"
@@ -76,20 +85,12 @@ TFT_eSPI tft = TFT_eSPI();
 // MODES
 // ======================================================
 
-enum ScanMode { BLE_MODE, WIFI_MODE };
 ScanMode currentMode = BLE_MODE;
 
-enum AppState { APP_MENU, APP_BLE_SCAN, APP_WIFI_SCAN, APP_CONFIG, APP_ABOUT, APP_DEAUTH, APP_TRIPWIRE, APP_HUNTER, APP_WIFI_HUNT };
 AppState appState = APP_MENU;
 int menuIndex = 0;
 const char* menuItems[] = {"BLE Scan", "WiFi Scan", "Config AP", "Deauth", "Tripwire", "Hunt", "W-Hunt", "About"};
 const int menuCount = 8;
-
-// ======================================================
-// BLE
-// ======================================================
-
-NimBLEScan* pBLEScan = nullptr;
 
 // ======================================================
 // SCAN RESULT QUEUE (producer: BLE callback / consumer: loop)
@@ -107,18 +108,6 @@ ScanResult resultQueue[RESULT_QUEUE_SIZE];
 volatile int resultQueueHead = 0;
 volatile int resultQueueTail = 0;
 
-// ======================================================
-// DEVICE STRUCT
-// ======================================================
-
-struct DeviceInfo {
-    char name[24];
-    char mac[18];
-    int8_t rssi;
-    bool isNew;
-    unsigned long firstSeen;
-    unsigned long lastSeen;
-};
 
 // ======================================================
 // STORAGE
@@ -133,6 +122,10 @@ int knownDeviceCount = 0;
 bool newDeviceDetected = false;
 int totalLogs = 0;
 bool sdReady = false;
+
+#ifndef DISABLE_BLE
+NimBLEScan* pBLEScan = nullptr;
+#endif
 
 // ======================================================
 // TARGET TRACKING
@@ -478,6 +471,7 @@ static int8_t wifiHuntTargetChannel = 0;
 static unsigned long wifiHuntRedrawTimer = 0;
 static uint8_t wifiHuntTargetBytes[6];
 static bool wifiHuntSniffing = false;
+static unsigned long wifiHuntLastSignalMs = 0;
 
 // Convert "XX:XX:XX:XX:XX:XX" string to 6 bytes
 static void parseMacBytes(const char* mac, uint8_t* out) {
@@ -851,6 +845,7 @@ static void drawWifiHuntScreen() {
 // BLE CALLBACK (lightweight — only fills ring buffer)
 // ======================================================
 
+#ifndef DISABLE_BLE
 class MyScanCallbacks : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* advertisedDevice) {
         int next = (resultQueueHead + 1) % RESULT_QUEUE_SIZE;
@@ -893,6 +888,7 @@ void bleInitTaskFunc(void *pvParameters) {
     bleInitDone = true;
     vTaskDelete(NULL);
 }
+#endif
 
 // ======================================================
 // HELPERS
@@ -1058,6 +1054,7 @@ int addOrUpdateDevice(const char* mac, const char* name, int8_t rssi) {
 // PROCESS QUEUED BLE RESULTS
 // ======================================================
 
+#ifndef DISABLE_BLE
 void processBLEResults() {
     while (resultQueueTail != resultQueueHead) {
         ScanResult& r = resultQueue[resultQueueTail];
@@ -1065,6 +1062,7 @@ void processBLEResults() {
         resultQueueTail = (resultQueueTail + 1) % RESULT_QUEUE_SIZE;
     }
 }
+#endif
 
 // ======================================================
 // UPDATE ACTIVE TARGET
@@ -1248,6 +1246,7 @@ void geigerSound() {
 // BLE SCAN (short duration to minimise AP disruption)
 // ======================================================
 
+#ifndef DISABLE_BLE
 // Async BLE scan state machine
 static bool bleScanBusy = false;
 
@@ -1263,6 +1262,7 @@ void processBLEScan() {
     pBLEScan->clearResults();
     bleScanBusy = false;
 }
+#endif
 
 // ======================================================
 // WIFI SCAN (async — non-blocking, preserves AP link)
@@ -1326,8 +1326,6 @@ void processWiFiScan() {
 
 
 // ======================================================
-// PROCESS QUEUED BLE RESULTS
-// ======================================================
 // CLEANUP STALE DEVICES
 // ======================================================
 
@@ -1348,13 +1346,17 @@ void cleanupDevices() {
 // ======================================================
 
 static bool firstMenuDraw = true;
+#ifndef DISABLE_BLE
 static bool bleInitted = false;
+#endif
 static bool wifiInitted = false;
 static bool webUIActive = false;
 static unsigned long apStartTime = 0;
 static bool apClientEverConnected = false;
 static AppState lastAppState = APP_MENU;
+#ifndef DISABLE_BLE
 static bool bleScanEntered = false;
+#endif
 static bool wifiScanEntered = false;
 static bool configDrawn = false;
 static bool aboutDrawn = false;
@@ -1405,6 +1407,7 @@ void handleTouch() {
                 }
                 return;
             }
+#ifndef DISABLE_BLE
             if (appState == APP_HUNTER && hunterPicking) {
                 int lc = 0;
                 for (int i = 0; i < tailSlotCount; i++)
@@ -1415,6 +1418,7 @@ void handleTouch() {
                 }
                 return;
             }
+#endif
             if (appState == APP_WIFI_HUNT && wifiHuntPicking) {
                 if (cachedAPCount > 0) {
                     wifiHuntPickIndex = (wifiHuntPickIndex + 1) % cachedAPCount;
@@ -1453,7 +1457,10 @@ void handleTouch() {
                     case 6: appState = APP_WIFI_HUNT; break;
                     case 7: appState = APP_ABOUT; break;
                 }
-            } else if (appState == APP_HUNTER && hunterPicking) {
+                tft.fillScreen(TFT_BLACK);
+            }
+#ifndef DISABLE_BLE
+            else if (appState == APP_HUNTER && hunterPicking) {
                 // Select target: find the one at current pick index
                 int lc = 0;
                 struct { int idx; } list[HUNTER_PICK_COUNT];
@@ -1486,7 +1493,9 @@ void handleTouch() {
                     deviceCount = 0;
                     drawHuntScreen();
                 }
-            } else if (appState == APP_WIFI_HUNT && wifiHuntPicking) {
+            }
+#endif
+            else if (appState == APP_WIFI_HUNT && wifiHuntPicking) {
                 if (cachedAPCount > 0 && wifiHuntPickIndex < cachedAPCount) {
                     strncpy(wifiHuntTargetBssid, cachedAPs[wifiHuntPickIndex].bssid, 17);
                     wifiHuntTargetBssid[17] = '\0';
@@ -1499,6 +1508,7 @@ void handleTouch() {
                     wifiHuntPicking = false;
                     wifiHuntSniffing = false;
                     wifiHuntPacketTimer = millis();
+                    wifiHuntLastSignalMs = millis();
                     wifiHuntPrevLevel = 0;
                     deviceCount = 0;
                     drawWifiHuntScreen();
@@ -1506,8 +1516,8 @@ void handleTouch() {
             } else {
                 appState = APP_MENU;
                 menuIndex = 0;
+                tft.fillScreen(TFT_BLACK);
             }
-            tft.fillScreen(TFT_BLACK);
         }
     }
 }
@@ -1698,21 +1708,24 @@ void loop() {
         tailsDrawn = false;
         hunterDrawn = false;
         wifiHuntDrawn = false;
-        bleScanBusy = false;
+        wifiInitted = false;
         wifiScanState = 0;
-        bleScanEntered = false;
         wifiScanEntered = false;
         configDrawn = false;
         aboutDrawn = false;
         deauthDrawn = false;
+#ifndef DISABLE_BLE
+        bleScanBusy = false;
+        bleScanEntered = false;
         bleInitted = false;
         bleInitDone = false;
-        lastAppState = appState;
-        firstMenuDraw = true;
         if (bleInitTask != NULL) {
             vTaskDelete(bleInitTask);
             bleInitTask = NULL;
         }
+#endif
+        lastAppState = appState;
+        firstMenuDraw = true;
     }
 
     // ========================================================
@@ -1735,6 +1748,7 @@ void loop() {
         // BLE SCAN MODE
         // ------------------------------------------------
         case APP_BLE_SCAN:
+#ifndef DISABLE_BLE
             if (!bleInitted) {
                 bleInitted = true;
                 tft.fillScreen(TFT_BLACK);
@@ -1793,6 +1807,20 @@ void loop() {
                 drawSweep();
                 lastDrawTime = now;
             }
+#else
+            tft.fillScreen(TFT_BLACK);
+            tft.setTextColor(TFT_RED);
+            tft.setTextSize(2);
+            tft.setCursor(20, 100);
+            tft.print("BLE NOT AVAILABLE");
+            tft.setTextSize(1);
+            tft.setTextColor(TFT_WHITE);
+            tft.setCursor(15, 140);
+            tft.print("ESP32-C5 lacks NimBLE");
+            tft.setTextColor(TFT_DARKGREEN);
+            tft.setCursor(40, 218);
+            tft.print("HOLD TO RETURN");
+#endif
             break;
 
         // ------------------------------------------------
@@ -1952,6 +1980,7 @@ void loop() {
         // DEVICE HUNTER (pick target → track live RSSI)
         // ------------------------------------------------
         case APP_HUNTER:
+#ifndef DISABLE_BLE
             if (!hunterDrawn) {
                 if (pBLEScan == NULL) {
                     delay(10);
@@ -1997,8 +2026,7 @@ void loop() {
                         }
                     }
                     if (!found) {
-                        hunterTargetRssi = min(hunterTargetRssi + 1, -90);
-                        if (hunterTargetRssi > -90) hunterTargetRssi = -100;
+                        hunterTargetRssi = max(hunterTargetRssi - 1, -100);
                     }
 
                     // Signal-adaptive beep
@@ -2037,6 +2065,20 @@ void loop() {
                     drawHuntScreen();
                 }
             }
+#else
+            tft.fillScreen(TFT_BLACK);
+            tft.setTextColor(TFT_RED);
+            tft.setTextSize(2);
+            tft.setCursor(20, 100);
+            tft.print("HUNT NOT AVAILABLE");
+            tft.setTextSize(1);
+            tft.setTextColor(TFT_WHITE);
+            tft.setCursor(15, 140);
+            tft.print("Hunt requires BLE");
+            tft.setTextColor(TFT_DARKGREEN);
+            tft.setCursor(40, 218);
+            tft.print("HOLD TO RETURN");
+#endif
             break;
 
         // ------------------------------------------------
@@ -2053,6 +2095,7 @@ void loop() {
                 wifiHuntPrevLevel = 0;
                 wifiHuntSniffing = false;
                 wifiHuntPacketTimer = millis();
+                wifiHuntLastSignalMs = millis();
                 drawWifiHuntPickScreen();
                 wifiHuntDrawn = true;
             }
@@ -2073,6 +2116,7 @@ void loop() {
                     esp_wifi_set_channel(wifiHuntTargetChannel, WIFI_SECOND_CHAN_NONE);
                     wifiHuntSniffing = true;
                     wifiHuntPacketTimer = millis();
+                    wifiHuntLastSignalMs = millis();
                 }
 
                 // Every 250ms, do a fast directed scan for accurate RSSI
@@ -2081,12 +2125,13 @@ void loop() {
                     int rssi = wifiHuntFastScan();
                     if (rssi > -100) {
                         wifiHuntTargetRssi = rssi;
+                        wifiHuntLastSignalMs = millis();
                         Serial.printf("[W-HUNT] RSSI: %d\n", rssi);
                     }
                 }
 
-                // Decay after 2s of no data (AP disappeared)
-                if (millis() - wifiHuntPacketTimer > 2000) {
+                // Decay after 2s of no actual signal (AP disappeared)
+                if (millis() - wifiHuntLastSignalMs > 2000) {
                     wifiHuntTargetRssi = max(-100, wifiHuntTargetRssi - 1);
                 }
 
@@ -2135,6 +2180,7 @@ void loop() {
         // TRIPWIRE MODE (baseline → monitor)
         // ------------------------------------------------
         case APP_TRIPWIRE:
+#ifndef DISABLE_BLE
             if (!tailsDrawn) {
                 if (pBLEScan == NULL) {
                     delay(10);
@@ -2187,6 +2233,20 @@ void loop() {
 
                 drawTailsScreen();
             }
+#else
+            tft.fillScreen(TFT_BLACK);
+            tft.setTextColor(TFT_RED);
+            tft.setTextSize(2);
+            tft.setCursor(10, 100);
+            tft.print("TRIPWIRE UNAVAILABLE");
+            tft.setTextSize(1);
+            tft.setTextColor(TFT_WHITE);
+            tft.setCursor(15, 140);
+            tft.print("Tripwire requires BLE");
+            tft.setTextColor(TFT_DARKGREEN);
+            tft.setCursor(40, 218);
+            tft.print("HOLD TO RETURN");
+#endif
             break;
     }
 
