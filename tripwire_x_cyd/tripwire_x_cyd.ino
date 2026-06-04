@@ -7,6 +7,7 @@
 #include <SD.h>
 #include <FS.h>
 #include "boot.h"
+#include "types.h"
 #include "WebUI.h"
 #include "squirrel_egg.h"
 #include "oui.h"
@@ -79,10 +80,8 @@ TFT_eSPI tft = TFT_eSPI();
 // MODES
 // ======================================================
 
-enum ScanMode { BLE_MODE, WIFI_MODE };
 ScanMode currentMode = BLE_MODE;
 
-enum AppState { APP_MENU, APP_BLE_SCAN, APP_WIFI_SCAN, APP_CONFIG, APP_ABOUT, APP_DEAUTH, APP_TRIPWIRE, APP_HUNTER, APP_WIFI_HUNT };
 AppState appState = APP_MENU;
 int menuIndex = 0;
 const char* menuItems[] = {"BLE Scan", "WiFi Scan", "Config AP", "Deauth", "Tripwire", "Hunt", "W-Hunt", "About"};
@@ -110,18 +109,6 @@ ScanResult resultQueue[RESULT_QUEUE_SIZE];
 volatile int resultQueueHead = 0;
 volatile int resultQueueTail = 0;
 
-// ======================================================
-// DEVICE STRUCT
-// ======================================================
-
-struct DeviceInfo {
-    char name[24];
-    char mac[18];
-    int8_t rssi;
-    bool isNew;
-    unsigned long firstSeen;
-    unsigned long lastSeen;
-};
 
 // ======================================================
 // STORAGE
@@ -481,6 +468,7 @@ static int8_t wifiHuntTargetChannel = 0;
 static unsigned long wifiHuntRedrawTimer = 0;
 static uint8_t wifiHuntTargetBytes[6];
 static bool wifiHuntSniffing = false;
+static unsigned long wifiHuntLastSignalMs = 0;
 
 // Convert "XX:XX:XX:XX:XX:XX" string to 6 bytes
 static void parseMacBytes(const char* mac, uint8_t* out) {
@@ -1329,8 +1317,6 @@ void processWiFiScan() {
 
 
 // ======================================================
-// PROCESS QUEUED BLE RESULTS
-// ======================================================
 // CLEANUP STALE DEVICES
 // ======================================================
 
@@ -1466,6 +1452,7 @@ void handleTouch() {
                     case 6: appState = APP_WIFI_HUNT; break;
                     case 7: appState = APP_ABOUT; break;
                 }
+                tft.fillScreen(TFT_BLACK);
             } else if (appState == APP_HUNTER && hunterPicking) {
                 // Select target: find the one at current pick index
                 int lc = 0;
@@ -1512,6 +1499,7 @@ void handleTouch() {
                     wifiHuntPicking = false;
                     wifiHuntSniffing = false;
                     wifiHuntPacketTimer = millis();
+                    wifiHuntLastSignalMs = millis();
                     wifiHuntPrevLevel = 0;
                     deviceCount = 0;
                     drawWifiHuntScreen();
@@ -1519,8 +1507,8 @@ void handleTouch() {
             } else {
                 appState = APP_MENU;
                 menuIndex = 0;
+                tft.fillScreen(TFT_BLACK);
             }
-            tft.fillScreen(TFT_BLACK);
         }
     }
 }
@@ -1720,6 +1708,7 @@ void loop() {
         hunterDrawn = false;
         wifiHuntDrawn = false;
         bleScanBusy = false;
+        wifiInitted = false;
         wifiScanState = 0;
         bleScanEntered = false;
         wifiScanEntered = false;
@@ -2018,8 +2007,7 @@ void loop() {
                         }
                     }
                     if (!found) {
-                        hunterTargetRssi = min(hunterTargetRssi + 1, -90);
-                        if (hunterTargetRssi > -90) hunterTargetRssi = -100;
+                        hunterTargetRssi = max(hunterTargetRssi - 1, -100);
                     }
 
                     // Signal-adaptive beep
@@ -2074,6 +2062,7 @@ void loop() {
                 wifiHuntPrevLevel = 0;
                 wifiHuntSniffing = false;
                 wifiHuntPacketTimer = millis();
+                wifiHuntLastSignalMs = millis();
                 drawWifiHuntPickScreen();
                 wifiHuntDrawn = true;
             }
@@ -2094,6 +2083,7 @@ void loop() {
                     esp_wifi_set_channel(wifiHuntTargetChannel, WIFI_SECOND_CHAN_NONE);
                     wifiHuntSniffing = true;
                     wifiHuntPacketTimer = millis();
+                    wifiHuntLastSignalMs = millis();
                 }
 
                 // Every 250ms, do a fast directed scan for accurate RSSI
@@ -2102,12 +2092,13 @@ void loop() {
                     int rssi = wifiHuntFastScan();
                     if (rssi > -100) {
                         wifiHuntTargetRssi = rssi;
+                        wifiHuntLastSignalMs = millis();
                         Serial.printf("[W-HUNT] RSSI: %d\n", rssi);
                     }
                 }
 
-                // Decay after 2s of no data (AP disappeared)
-                if (millis() - wifiHuntPacketTimer > 2000) {
+                // Decay after 2s of no actual signal (AP disappeared)
+                if (millis() - wifiHuntLastSignalMs > 2000) {
                     wifiHuntTargetRssi = max(-100, wifiHuntTargetRssi - 1);
                 }
 
