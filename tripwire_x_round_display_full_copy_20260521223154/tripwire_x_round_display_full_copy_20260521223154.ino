@@ -78,6 +78,7 @@ TFT_eSPI tft = TFT_eSPI();
 // Touch controller is CHSC6X on the Seeed Round Display (I2C addr 0x2E, INT pin driven LOW when pressed)
 // No CST816S library needed — we poll the INT pin directly
 
+#define TFT_BL     11  // D6 — display backlight (GC9A01 BL pin on Seeed Round Display)
 #define BUZZER_PIN 26  // JST pin 2 (BAT_VOLT_PIN_EN — safe as buzzer output when not using batt monitoring)
 #define SD_CS      1   // D0
 
