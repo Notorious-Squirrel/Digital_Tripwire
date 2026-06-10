@@ -1,0 +1,10 @@
+{
+  "additionalFiles": "../..,../..,../..,../..,../..,../..",
+  "builtInLibrariesFolders": "/home/notoruss/.arduino15/libraries",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:XIAO_ESP32C5:UploadSpeed=921600,CDCOnBoot=cdc,CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,DebugLevel=none,PSRAM=disabled,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default",
+  "hardwareFolders": "/home/notoruss/.arduino15/packages/esp32/hardware/esp32/3.3.10,/home/notoruss/.arduino15/packages/esp32/hardware/esp32/3.3.10",
+  "otherLibrariesFolders": "/home/notoruss/Arduino/libraries",
+  "sketchLocation": "/home/notoruss/Arduino/tripwire/Digital_Tripwire/tripwire_x_round_display_full_copy_20260521223154"
+}

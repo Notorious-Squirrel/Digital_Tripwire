@@ -1,0 +1,5 @@
+--flash-mode dio --flash-freq 80m --flash-size 8MB
+0x2000 tripwire_x_round_display_full_copy_20260521223154.ino.bootloader.bin
+0x8000 tripwire_x_round_display_full_copy_20260521223154.ino.partitions.bin
+0xe000 boot_app0.bin
+0x10000 tripwire_x_round_display_full_copy_20260521223154.ino.bin
